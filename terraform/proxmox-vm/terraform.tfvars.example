@@ -1,0 +1,43 @@
+# Copy to terraform.tfvars and edit. Credentials are NOT set in this file.
+# Export them in the shell that runs Terraform:
+#
+#   export PROXMOX_VE_ENDPOINT="https://192.0.2.10:8006/"
+#   export PROXMOX_VE_API_TOKEN="terraform@pve!tf=<token-secret>"
+#   export PROXMOX_VE_SSH_USERNAME="root"   # used only to upload the snippet
+#
+# terraform.tfvars should be listed in .gitignore.
+
+node_name = "pve01"
+vm_id     = 110
+vm_name   = "web01"
+vm_tags   = ["terraform", "debian12", "web"]
+
+protection    = false
+start_on_boot = true
+
+cpu_cores = 2
+memory_mb = 2048
+
+vm_datastore_id       = "local-lvm"
+image_datastore_id    = "local"
+snippets_datastore_id = "local"
+disk_size_gb          = 20
+
+# Pin the image by checksum once you have looked it up in SHA512SUMS:
+# cloud_image_checksum = "<sha512 from https://cloud.debian.org/images/cloud/bookworm/latest/SHA512SUMS>"
+
+network_bridge = "vmbr0"
+# vlan_id      = 20
+
+# DHCP (default) ...
+ipv4_address = "dhcp"
+# ... or static:
+# ipv4_address = "192.0.2.50/24"
+# ipv4_gateway = "192.0.2.1"
+# dns_servers  = ["192.0.2.1"]
+
+cloud_init_username = "admin"
+ssh_public_keys = [
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyReplaceMe admin@example.com",
+]
+timezone = "Etc/UTC"

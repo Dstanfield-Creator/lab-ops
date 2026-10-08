@@ -26,3 +26,16 @@ jobs:
               except Exception as e: print("FAIL", f, e); bad += 1
           sys.exit(1 if bad else 0)
           PY
+  shellcheck:
+    runs-on: ubuntu-latest
+    name: ShellCheck
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+      - name: Lint shell scripts
+        run: |
+          shellcheck -S error \
+            scripts/lab-power-scripts/lab-up \
+            scripts/lab-power-scripts/lab-down \
+            scripts/lab-ssh-check/lab-ssh-check

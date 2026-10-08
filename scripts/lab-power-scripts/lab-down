@@ -1,0 +1,168 @@
+#!/bin/bash
+# lab-down — gracefully shut the homelab down, then power off the Proxmox host.
+#
+#   lab-down
+#
+# Steps: check the host answers -> stop the Minecraft service -> ACPI shutdown
+# of every running VM and container (except the STANDALONE list) -> wait up to
+# SHUTDOWN_TIMEOUT, force-stop anything still running -> shut the node down.
+# Logged to ~/.lab/lab-YYYYMMDD.log.
+#
+# All host-specific values live in the Config block. Addresses below are
+# RFC 5737 documentation examples — replace them with your own.
+# ─── Config ──────────────────────────────────────────────────────────────────
+PROXMOX_HOST="192.0.2.10"
+PROXMOX_NODE="pve"
+SHUTDOWN_TIMEOUT=120  # seconds before force-stopping guests
+STANDALONE_VMS=(111)  # VMs excluded from lab-up/lab-down entirely (e.g. one-off test VMs)
+
+MCSERVER_SSH="mcserver"    # SSH config alias for the Minecraft host
+MCSERVER_SERVICE="minecraft"   # systemd service running the Minecraft server
+
+LOG_DIR="$HOME/.lab"
+LOG_FILE="$LOG_DIR/lab-$(date +%Y%m%d).log"
+# ─────────────────────────────────────────────────────────────────────────────
+
+set -euo pipefail
+mkdir -p "$LOG_DIR"
+exec > >(tee -a "$LOG_FILE") 2>&1
+echo "=== lab-down started $(date '+%Y-%m-%d %H:%M:%S') ==="
+
+# ── Credentials ──────────────────────────────────────────────────────────────
+# The Proxmox API token is never stored in this script. It is read, in order, from:
+#   1. $PROXMOX_TOKEN in the environment
+#   2. $TOKEN_FILE (mode 600), one line: PVEAPIToken=<user>@<realm>!<tokenid>=<secret>
+#   3. 1Password CLI (op) — item / vault / field named below (may prompt in the app)
+OP_ITEM="${OP_ITEM:-pve-api-token}"
+OP_VAULT="${OP_VAULT:-Infra}"
+OP_FIELD="${OP_FIELD:-API Token Header}"
+TOKEN_FILE="${TOKEN_FILE:-$HOME/.config/lab/proxmox.token}"
+
+PROXMOX_TOKEN="${PROXMOX_TOKEN:-}"
+if [[ -z "$PROXMOX_TOKEN" && -r "$TOKEN_FILE" ]]; then
+    PROXMOX_TOKEN="$(head -n1 "$TOKEN_FILE")"
+fi
+if [[ -z "$PROXMOX_TOKEN" ]] && command -v op &>/dev/null; then
+    PROXMOX_TOKEN="$(timeout 20 op item get "$OP_ITEM" --vault "$OP_VAULT" --fields "$OP_FIELD" 2>/dev/null)" || PROXMOX_TOKEN=""
+fi
+if [[ -z "$PROXMOX_TOKEN" ]]; then
+    echo "ERROR: no Proxmox API token found (PROXMOX_TOKEN, $TOKEN_FILE, or 1Password)." >&2
+    exit 1
+fi
+
+proxmox_api() {
+    local method="$1" path="$2"; shift 2
+    curl -s -k -X "$method" \
+        -H "Authorization: ${PROXMOX_TOKEN}" \
+        "https://${PROXMOX_HOST}:8006/api2/json${path}" "$@"
+}
+
+# ── 1. Check Proxmox is reachable ────────────────────────────────────────────
+if ! /usr/bin/ping -c1 -W3 "$PROXMOX_HOST" &>/dev/null; then
+    echo "ERROR: Proxmox ($PROXMOX_HOST) is not reachable. Is the lab already down?"
+    exit 1
+fi
+echo "Proxmox is reachable."
+
+# ── 2. Stop mcserver Minecraft service ───────────────────────────────────────
+echo "Stopping mcserver Minecraft service ($MCSERVER_SSH)..."
+if ssh -o BatchMode=yes -o ConnectTimeout=10 "$MCSERVER_SSH" \
+    "sudo systemctl stop ${MCSERVER_SERVICE}" 2>&1 | sed 's/^/  /'; then
+    echo "  [OK] mcserver service stopped."
+else
+    echo "  [WARN] Could not stop mcserver service — continuing."
+fi
+
+# ── 3. Shut down all running QEMU VMs ────────────────────────────────────────
+echo "Shutting down all QEMU VMs..."
+_qemu=$(proxmox_api GET "/nodes/${PROXMOX_NODE}/qemu" | python3 -c "
+import sys, json
+for vm in sorted(json.load(sys.stdin).get('data', []), key=lambda v: v['vmid']):
+    if vm['status'] == 'running' and not vm.get('template'):
+        print(f\"{vm['vmid']}|{vm.get('name','?')}\")
+")
+if [[ -n "$_qemu" ]]; then
+    while IFS='|' read -r vmid name; do
+        [[ -z "$vmid" ]] && continue
+        skip=0
+        for st_id in "${STANDALONE_VMS[@]}"; do
+            [[ "$vmid" == "$st_id" ]] && skip=1 && break
+        done
+        if [[ "$skip" -eq 1 ]]; then
+            echo "  VM $vmid ($name): skipped (standalone)"
+            continue
+        fi
+        echo "  VM $vmid ($name): shutting down..."
+        proxmox_api POST "/nodes/${PROXMOX_NODE}/qemu/${vmid}/status/shutdown" > /dev/null
+    done <<< "$_qemu"
+else
+    echo "  No running QEMU VMs."
+fi
+
+# ── 4. Shut down all running LXC containers ───────────────────────────────────
+echo "Shutting down all LXC containers..."
+_lxc=$(proxmox_api GET "/nodes/${PROXMOX_NODE}/lxc" | python3 -c "
+import sys, json
+for ct in sorted(json.load(sys.stdin).get('data', []), key=lambda v: v['vmid']):
+    if ct['status'] == 'running' and not ct.get('template'):
+        print(f\"{ct['vmid']}|{ct.get('name','?')}\")
+")
+if [[ -n "$_lxc" ]]; then
+    while IFS='|' read -r vmid name; do
+        [[ -z "$vmid" ]] && continue
+        echo "  CT $vmid ($name): shutting down..."
+        proxmox_api POST "/nodes/${PROXMOX_NODE}/lxc/${vmid}/status/shutdown" > /dev/null
+    done <<< "$_lxc"
+else
+    echo "  No running LXC containers."
+fi
+
+# ── 5. Wait for all guests to stop ───────────────────────────────────────────
+if [[ -n "$_qemu" || -n "$_lxc" ]]; then
+    echo "Waiting for guests to stop (up to ${SHUTDOWN_TIMEOUT}s)..."
+    elapsed=0
+    while true; do
+        _running_qemu=$(proxmox_api GET "/nodes/${PROXMOX_NODE}/qemu" | python3 -c "
+import sys, json
+standalone = {$(printf '%s,' "${STANDALONE_VMS[@]}")}
+ids = [str(v['vmid']) for v in json.load(sys.stdin).get('data', [])
+       if v['status'] == 'running' and not v.get('template') and v['vmid'] not in standalone]
+print(' '.join(ids))
+")
+        _running_lxc=$(proxmox_api GET "/nodes/${PROXMOX_NODE}/lxc" | python3 -c "
+import sys, json
+ids = [str(v['vmid']) for v in json.load(sys.stdin).get('data', [])
+       if v['status'] == 'running' and not v.get('template')]
+print(' '.join(ids))
+")
+        if [[ -z "${_running_qemu// /}" && -z "${_running_lxc// /}" ]]; then
+            echo "  All guests stopped."
+            break
+        fi
+        if (( elapsed >= SHUTDOWN_TIMEOUT )); then
+            echo "  [WARN] Timeout — force-stopping remaining guests..."
+            for vmid in $_running_qemu; do
+                proxmox_api POST "/nodes/${PROXMOX_NODE}/qemu/${vmid}/status/stop" > /dev/null
+                echo "  Force-stopped VM $vmid"
+            done
+            for vmid in $_running_lxc; do
+                proxmox_api POST "/nodes/${PROXMOX_NODE}/lxc/${vmid}/status/stop" > /dev/null
+                echo "  Force-stopped CT $vmid"
+            done
+            sleep 5; break
+        fi
+        echo "  Still running — VMs: ${_running_qemu:-none}  CTs: ${_running_lxc:-none} (${elapsed}s elapsed)"
+        sleep 10; (( elapsed += 10 ))
+    done
+fi
+
+# ── 6. Shut down Proxmox host ────────────────────────────────────────────────
+echo "Shutting down Proxmox host ($PROXMOX_HOST)..."
+proxmox_api POST "/nodes/${PROXMOX_NODE}/status" \
+    -d "command=shutdown" > /dev/null && \
+    echo "  [OK] Shutdown command sent to Proxmox node." || \
+    echo "  [WARN] API shutdown failed — host may already be down."
+
+echo ""
+echo "Lab is down."
+echo "=== lab-down finished $(date '+%Y-%m-%d %H:%M:%S') ==="

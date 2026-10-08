@@ -41,4 +41,4 @@ Host power and the lab's start/stop ordering are handled by helper scripts
 (see `../scripts/`), which use a least-privilege Proxmox API token as above.
 The design notes and the firewall dead-man-switch pattern they rely on are
 written up in the companion projects repository:
-[Dstanfield-Creator/projects](https://github.com/Dstanfield-Creator/projects).
+[the build write-ups in docs/](../docs/).

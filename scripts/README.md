@@ -1,18 +1,11 @@
 # scripts
 
-Operational helpers for the lab. The scripts themselves are kept with the
-tooling they belong to; this directory is a pointer and a place for
-lab-specific wrappers.
+Operational helpers for the lab, kept here as the versions actually in use with credentials removed.
 
-Typical helpers:
+| Tool | What it does |
+|---|---|
+| [lab-power-scripts/](./lab-power-scripts/) | `lab-up` wakes the Proxmox host (Wake-on-LAN), waits for the API, starts VMs and containers in a safe order honouring `research` / `ds-lab` modes, then starts the Minecraft service. `lab-down` is the reverse with a force-stop fallback. The Proxmox API token is read from the environment, a 600-mode token file, or 1Password, never from the script. |
+| [lab-ssh-check/](./lab-ssh-check/) | Sweeps every alias in `~/.ssh/config` in parallel and classifies each failure (DOWN / DNS / AUTH / HOSTKEY / HOSTKEY! / AGENT), skipping hosts known to be down. |
 
-- **lab-up / lab-down** - start and stop the VMs in a safe order using a
-  least-privilege Proxmox API token (read from the environment, a token file,
-  or 1Password - never hardcoded).
-- **lab-ssh-check** - sweep the lab for SSH reachability, skipping hosts that
-  are known to be down.
-
-The reasoning behind these tools, and the firewall dead-man-switch pattern used
-when changing host networking remotely, is written up in the companion
-projects repository:
-[Dstanfield-Creator/projects](https://github.com/Dstanfield-Creator/projects).
+The firewall dead-man switch used when changing host networking remotely lives in the
+[network](https://github.com/Dstanfield-Creator/network/tree/main/firewall/firewall-deadman-switch) repo.

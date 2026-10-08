@@ -1,0 +1,74 @@
+# Reference stack for the lab Docker host. Copy to docker-compose.yml, copy
+# .env.example to .env, fill in values, then `docker compose up -d`.
+name: lab
+
+services:
+  npm:
+    image: jc21/nginx-proxy-manager:2
+    container_name: npm
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "81:81"        # admin UI — keep LAN-only at the host firewall
+    volumes:
+      - ./npm/data:/data
+      - ./npm/letsencrypt:/etc/letsencrypt
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    container_name: n8n
+    restart: unless-stopped
+    environment:
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PROTOCOL=https
+      - WEBHOOK_URL=https://${N8N_HOST}/
+      - GENERIC_TIMEZONE=${TZ}
+      - TZ=${TZ}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    expose:
+      - "5678"        # reached only through NPM
+
+  grafana:
+    image: grafana/grafana-oss:12.1.0
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      - GF_SERVER_ROOT_URL=https://${GRAFANA_HOST}/
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+    volumes:
+      - grafana_data:/var/lib/grafana
+    expose:
+      - "3000"
+
+  rustdesk-hbbs:
+    image: rustdesk/rustdesk-server:latest
+    container_name: rustdesk-hbbs
+    restart: unless-stopped
+    command: hbbs
+    ports:
+      - "21115:21115"
+      - "21116:21116"
+      - "21116:21116/udp"
+      - "21118:21118"
+    volumes:
+      - ./rustdesk:/root
+    depends_on:
+      - rustdesk-hbbr
+
+  rustdesk-hbbr:
+    image: rustdesk/rustdesk-server:latest
+    container_name: rustdesk-hbbr
+    restart: unless-stopped
+    command: hbbr
+    ports:
+      - "21117:21117"
+      - "21119:21119"
+    volumes:
+      - ./rustdesk:/root
+
+volumes:
+  n8n_data:
+  grafana_data:

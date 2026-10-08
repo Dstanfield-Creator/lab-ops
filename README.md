@@ -24,9 +24,10 @@ The approach is GitOps-lite:
   or action has an update.
 
 The narrative write-ups - why things are built the way they are, what broke, and what I
-learned - live in the companion repository:
-[Dstanfield-Creator/projects](https://github.com/Dstanfield-Creator/projects). This repo
-is the machine-readable half; that one is the prose.
+learned - live in [`docs/`](./docs/). The scripts actually in use live in
+[`scripts/`](./scripts/), and the Proxmox VM Terraform in [`terraform/`](./terraform/).
+Monitoring stacks live in the [monitoring](https://github.com/Dstanfield-Creator/monitoring)
+department; network builds and firewall tooling in [network](https://github.com/Dstanfield-Creator/network).
 
 ## Architecture
 
@@ -70,15 +71,50 @@ lab-ops/
 │   ├── group_vars/          # Example variable overrides
 │   ├── playbooks/           # Entry-point playbooks (baseline.yml)
 │   └── roles/common/        # Admin user, SSH hardening, UFW, updates
-├── compose/                 # Docker Compose service stacks
-│   ├── monitoring/          # Prometheus, Grafana, exporters
-│   └── services/            # Reverse proxy, automation, status page
+├── compose/
+│   └── services/            # Reverse proxy, n8n, status page (monitoring stacks: see monitoring repo)
+├── terraform/
+│   └── proxmox-vm/          # Debian 12 cloud-image VM via bpg/proxmox: image, cloud-init snippet, LVM-thin disk
+├── scripts/
+│   ├── lab-power-scripts/   # lab-up / lab-down: Wake-on-LAN + Proxmox API orchestration
+│   └── lab-ssh-check/       # Parallel SSH reachability + key-auth checker
+├── docs/                    # Build write-ups
+│   ├── proxmox-lab-platform/    # The single-node PVE host everything runs on
+│   ├── proxmox-backup-server/   # Dedicated PBS VM, token ACLs, prune policy
+│   ├── docker-services-host/    # Services VM migrated from a Raspberry Pi 5 (+ compose reference)
+│   ├── minecraft-server/        # systemd-managed game server, Tailscale-only
+│   └── cloud-init-for-proxmox-and-cloud-vms.md
 ├── proxmox/                 # Hypervisor notes: API tokens, PBS backups
-├── scripts/                 # Lab power + reachability helpers (pointers)
 ├── renovate.json            # Dependency update automation config
+├── CONTRIBUTING.md          # Sanitisation rules
 ├── LICENSE
 └── README.md
 ```
+
+## Contents
+
+### Build write-ups (`docs/`)
+
+| Project | Summary | Status |
+|---|---|---|
+| [Proxmox Lab Platform](./docs/proxmox-lab-platform/) | 16-thread / 96 GB PVE 9 host: storage layout, bridges, guest inventory, research vs ds-lab modes, power management, backups | Active |
+| [Proxmox Backup Server](./docs/proxmox-backup-server/) | PBS 4 on its own datastore disk after a month of silent vzdump failures; token ACL gotchas documented | Active |
+| [Docker Services Host](./docs/docker-services-host/) | NPM, n8n, Grafana, RustDesk stack moving from a Pi 5 to a PVE VM; compose reference included | In progress |
+| [Minecraft Server](./docs/minecraft-server/) | Bare-metal game server under systemd, started/stopped with the lab, Tailscale access | Active |
+| [Cloud-init for Proxmox and Cloud VMs](./docs/cloud-init-for-proxmox-and-cloud-vms.md) | User-data guide: users and keys, sshd hardening, packages, UFW baseline, attaching on Proxmox and AWS | Active |
+
+### Scripts (`scripts/`)
+
+| Tool | Summary | Status |
+|---|---|---|
+| [Lab Power Scripts](./scripts/lab-power-scripts/) | `lab-up` / `lab-down`: Wake-on-LAN, API polling, mode-aware VM start, graceful shutdown with force-stop fallback, logging; token from env, file or 1Password | Active |
+| [lab-ssh-check](./scripts/lab-ssh-check/) | Checks every alias in `~/.ssh/config` in parallel and classifies DOWN / DNS / AUTH / HOSTKEY / HOSTKEY! | Active |
+
+### Provisioning (`terraform/`)
+
+| Module | Summary |
+|---|---|
+| [proxmox-vm](./terraform/proxmox-vm/) | Debian 12 cloud-image VM on Proxmox VE with the bpg/proxmox provider: image download, cloud-init snippet, LVM-thin disk, API token from environment variables |
 
 ## Tech Stack
 
@@ -88,7 +124,7 @@ lab-ops/
 | Guest OS         | Debian                   | Base image for every VM                      |
 | Config mgmt      | Ansible                  | Applies the `common` host baseline           |
 | Services         | Docker Compose           | Runs containerised workloads on docker-host  |
-| Observability    | Prometheus / Grafana     | Metrics collection and dashboards            |
+| Observability    | Prometheus / Grafana     | Stacks live in the [monitoring](https://github.com/Dstanfield-Creator/monitoring) repo |
 | Remote access    | Tailscale                | Mesh VPN; no ports exposed to the internet   |
 | Dependency bot   | Renovate                 | Opens PRs for image and action updates       |
 | CI               | GitHub Actions           | Lint and validate on push (added separately) |
@@ -110,10 +146,10 @@ Run against a single host, or check what would change first:
 ansible-playbook playbooks/baseline.yml --limit docker-host --check --diff
 ```
 
-Bring up a Compose stack (monitoring shown; `services` is the same shape):
+Bring up the services Compose stack:
 
 ```bash
-cd compose/monitoring
+cd compose/services
 cp .env.example .env                      # then fill in local values
 docker compose pull
 docker compose up -d

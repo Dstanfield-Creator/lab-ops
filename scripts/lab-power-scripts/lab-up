@@ -1,0 +1,207 @@
+#!/bin/bash
+# lab-up — wake the Proxmox host and bring the homelab online.
+#
+#   lab-up                    # full lab (default mode: ds-lab)
+#   lab-up --mode research    # leave the AD range VMs (105-108) powered off
+#
+# Steps: Wake-on-LAN -> wait for ping -> wait for the API -> start QEMU VMs
+# (honouring mode and the STANDALONE list) -> start LXC containers -> start
+# the Minecraft service on its host -> print a summary. Everything is logged
+# to ~/.lab/lab-YYYYMMDD.log; logs older than 30 days are pruned.
+#
+# All host-specific values live in the Config block. Addresses below are
+# RFC 5737 documentation examples — replace them with your own.
+# ─── Config ──────────────────────────────────────────────────────────────────
+PROXMOX_HOST="192.0.2.10"
+PROXMOX_NODE="pve"
+PROXMOX_MAC="00:11:22:33:44:55"
+
+MCSERVER_SSH="mcserver"   # SSH config alias for the Minecraft host
+MCSERVER_SERVICE="minecraft"   # systemd service running the Minecraft server
+
+BOOT_TIMEOUT=180      # seconds to wait for Proxmox to become pingable
+API_TIMEOUT=60        # seconds to wait for Proxmox API after ping
+
+LOG_DIR="$HOME/.lab"
+LOG_FILE="$LOG_DIR/lab-$(date +%Y%m%d).log"
+
+# ─── Mode ─────────────────────────────────────────────────────────────────────
+# --mode research  → DS-lab VMs (105-108) stay off
+# --mode ds-lab    → full lab including AD domain (default)
+# --mode all       → alias for ds-lab
+MODE="ds-lab"
+DS_LAB_VMS=(105 106 107 108)   # VMs to skip in research mode
+STANDALONE_VMS=(111)           # VMs excluded from lab-up/lab-down entirely (e.g. one-off test VMs)
+
+for arg in "$@"; do
+    case "$arg" in
+        --mode) ;;
+        research) MODE="research" ;;
+        ds-lab|all) MODE="ds-lab" ;;
+    esac
+done
+
+# Parse "--mode <value>" form
+for i in $(seq 1 $#); do
+    if [[ "${!i}" == "--mode" ]]; then
+        next=$((i+1))
+        MODE="${!next:-ds-lab}"
+    fi
+done
+# ─────────────────────────────────────────────────────────────────────────────
+
+set -euo pipefail
+mkdir -p "$LOG_DIR"
+find "$LOG_DIR" -name "lab-*.log" -mtime +30 -delete 2>/dev/null || true
+exec > >(tee -a "$LOG_FILE") 2>&1
+echo "=== lab-up started $(date '+%Y-%m-%d %H:%M:%S') | mode=$MODE ==="
+
+# ── Credentials ──────────────────────────────────────────────────────────────
+# The Proxmox API token is never stored in this script. It is read, in order, from:
+#   1. $PROXMOX_TOKEN in the environment
+#   2. $TOKEN_FILE (mode 600), one line: PVEAPIToken=<user>@<realm>!<tokenid>=<secret>
+#   3. 1Password CLI (op) — item / vault / field named below (may prompt in the app)
+OP_ITEM="${OP_ITEM:-pve-api-token}"
+OP_VAULT="${OP_VAULT:-Infra}"
+OP_FIELD="${OP_FIELD:-API Token Header}"
+TOKEN_FILE="${TOKEN_FILE:-$HOME/.config/lab/proxmox.token}"
+
+PROXMOX_TOKEN="${PROXMOX_TOKEN:-}"
+if [[ -z "$PROXMOX_TOKEN" && -r "$TOKEN_FILE" ]]; then
+    PROXMOX_TOKEN="$(head -n1 "$TOKEN_FILE")"
+fi
+if [[ -z "$PROXMOX_TOKEN" ]] && command -v op &>/dev/null; then
+    PROXMOX_TOKEN="$(timeout 20 op item get "$OP_ITEM" --vault "$OP_VAULT" --fields "$OP_FIELD" 2>/dev/null)" || PROXMOX_TOKEN=""
+fi
+if [[ -z "$PROXMOX_TOKEN" ]]; then
+    echo "ERROR: no Proxmox API token found (PROXMOX_TOKEN, $TOKEN_FILE, or 1Password)." >&2
+    exit 1
+fi
+
+proxmox_api() {
+    local method="$1" path="$2"; shift 2
+    curl -s -k -X "$method" \
+        -H "Authorization: ${PROXMOX_TOKEN}" \
+        "https://${PROXMOX_HOST}:8006/api2/json${path}" "$@"
+}
+
+# ── 1. Wake Proxmox ──────────────────────────────────────────────────────────
+echo "Sending Wake-on-LAN to Proxmox ($PROXMOX_MAC)..."
+python3 - <<EOF
+import socket
+mac = "$PROXMOX_MAC".replace(":","").replace("-","")
+magic = bytes.fromhex("ff"*6 + mac*16)
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+sock.sendto(magic, ("<broadcast>", 9))
+sock.close()
+print("  WoL sent.")
+EOF
+
+# ── 2. Wait for Proxmox to boot ───────────────────────────────────────────────
+echo "Waiting for Proxmox ($PROXMOX_HOST) to come online (up to ${BOOT_TIMEOUT}s)..."
+elapsed=0
+until /usr/bin/ping -c1 -W2 "$PROXMOX_HOST" &>/dev/null; do
+    if (( elapsed >= BOOT_TIMEOUT )); then
+        echo "ERROR: Proxmox did not respond within ${BOOT_TIMEOUT}s."
+        exit 1
+    fi
+    sleep 5; (( elapsed += 5 ))
+done
+echo "  Proxmox is pingable."
+
+# ── 3. Wait for Proxmox API ───────────────────────────────────────────────────
+echo "Waiting for Proxmox API (port 8006)..."
+elapsed=0
+until curl -sk --max-time 3 "https://${PROXMOX_HOST}:8006" > /dev/null 2>&1; do
+    if (( elapsed >= API_TIMEOUT )); then
+        echo "ERROR: Proxmox API not available within ${API_TIMEOUT}s."
+        exit 1
+    fi
+    sleep 3; (( elapsed += 3 ))
+done
+echo "  Proxmox API is ready."
+
+# ── 4. Start QEMU VMs ────────────────────────────────────────────────────────
+echo "Starting QEMU VMs (mode=$MODE)..."
+_qemu=$(proxmox_api GET "/nodes/${PROXMOX_NODE}/qemu" | python3 -c "
+import sys, json
+for vm in sorted(json.load(sys.stdin).get('data', []), key=lambda v: v['vmid']):
+    if not vm.get('template'):
+        print(f\"{vm['vmid']}|{vm.get('name','?')}|{vm['status']}\")
+")
+if [[ -n "$_qemu" ]]; then
+    while IFS='|' read -r vmid name status; do
+        [[ -z "$vmid" ]] && continue
+        # Skip standalone VMs (never auto-managed)
+        skip=0
+        for st_id in "${STANDALONE_VMS[@]}"; do
+            [[ "$vmid" == "$st_id" ]] && skip=1 && break
+        done
+        if [[ "$skip" -eq 1 ]]; then
+            echo "  VM $vmid ($name): skipped (standalone)"
+            continue
+        fi
+        # Skip DS-lab VMs in research mode
+        if [[ "$MODE" == "research" ]]; then
+            skip=0
+            for ds_id in "${DS_LAB_VMS[@]}"; do
+                [[ "$vmid" == "$ds_id" ]] && skip=1 && break
+            done
+            if [[ "$skip" -eq 1 ]]; then
+                echo "  VM $vmid ($name): skipped (research mode)"
+                continue
+            fi
+        fi
+        if [[ "$status" == "running" ]]; then
+            echo "  VM $vmid ($name): already running"
+        else
+            echo "  VM $vmid ($name): starting..."
+            proxmox_api POST "/nodes/${PROXMOX_NODE}/qemu/${vmid}/status/start" > /dev/null
+        fi
+    done <<< "$_qemu"
+fi
+
+# ── 5. Start LXC containers ──────────────────────────────────────────────────
+echo "Starting LXC containers..."
+_lxc=$(proxmox_api GET "/nodes/${PROXMOX_NODE}/lxc" | python3 -c "
+import sys, json
+for ct in sorted(json.load(sys.stdin).get('data', []), key=lambda v: v['vmid']):
+    if not ct.get('template'):
+        print(f\"{ct['vmid']}|{ct.get('name','?')}|{ct['status']}\")
+")
+if [[ -n "$_lxc" ]]; then
+    while IFS='|' read -r vmid name status; do
+        [[ -z "$vmid" ]] && continue
+        if [[ "$status" == "running" ]]; then
+            echo "  CT $vmid ($name): already running"
+        else
+            echo "  CT $vmid ($name): starting..."
+            proxmox_api POST "/nodes/${PROXMOX_NODE}/lxc/${vmid}/status/start" > /dev/null
+        fi
+    done <<< "$_lxc"
+else
+    echo "  No LXC containers."
+fi
+
+# ── 6. Start mcserver Minecraft service ──────────────────────────────────────
+echo "Checking mcserver ($MCSERVER_SSH)..."
+if ssh -o BatchMode=yes -o ConnectTimeout=10 "$MCSERVER_SSH" \
+    "sudo systemctl start ${MCSERVER_SERVICE}" 2>/dev/null; then
+    if ssh -o BatchMode=yes -o ConnectTimeout=10 "$MCSERVER_SSH" \
+        "systemctl is-active ${MCSERVER_SERVICE}" 2>/dev/null | grep -q '^active'; then
+        echo "  mcserver: Minecraft service active."
+    else
+        echo "  [WARN] mcserver service started but not confirmed active yet."
+    fi
+else
+    echo "  [WARN] Could not reach mcserver to start the Minecraft service."
+fi
+
+# ── 7. Summary ───────────────────────────────────────────────────────────────
+echo ""
+echo "Lab is up  (mode=$MODE)."
+echo "  Proxmox UI:  https://${PROXMOX_HOST}:8006"
+echo "  mcserver:    ssh mcserver  (Minecraft, systemd: ${MCSERVER_SERVICE})"
+echo ""
+echo "=== lab-up finished $(date '+%Y-%m-%d %H:%M:%S') ==="
