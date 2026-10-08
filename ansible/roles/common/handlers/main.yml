@@ -1,0 +1,9 @@
+---
+# Handlers for the common role.
+
+- name: Reload sshd
+  # Config is validated in the task's `validate:` step before notify fires,
+  # so a reload here will not drop existing sessions on a bad config.
+  ansible.builtin.systemd:
+    name: ssh
+    state: reloaded

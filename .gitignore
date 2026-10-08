@@ -1,0 +1,4 @@
+# local test artifacts
+*.log
+.venv/
+__pycache__/

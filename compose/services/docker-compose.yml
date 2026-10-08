@@ -1,0 +1,59 @@
+---
+# Services stack: Nginx Proxy Manager, n8n, Uptime Kuma.
+# Image tags are pinned; named volumes hold persistent state.
+# Copy .env.example to .env before bringing this up.
+
+name: services
+
+services:
+  npm:
+    image: jc21/nginx-proxy-manager:2.12.1
+    container_name: npm
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      # Admin UI on loopback only; reach it over Tailscale.
+      - "127.0.0.1:81:81"
+    volumes:
+      - npm-data:/data
+      - npm-letsencrypt:/etc/letsencrypt
+    networks:
+      - edge
+
+  n8n:
+    image: n8nio/n8n:1.70.0
+    container_name: n8n
+    restart: unless-stopped
+    environment:
+      N8N_HOST: "${N8N_HOST}"
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: "https"
+      WEBHOOK_URL: "${N8N_WEBHOOK_URL}"
+      GENERIC_TIMEZONE: "${TZ}"
+      N8N_ENCRYPTION_KEY: "${N8N_ENCRYPTION_KEY}"
+    volumes:
+      - n8n-data:/home/node/.n8n
+    # No published ports; fronted by the reverse proxy on the edge network.
+    networks:
+      - edge
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1.23.16
+    container_name: uptime-kuma
+    restart: unless-stopped
+    volumes:
+      - uptime-kuma-data:/app/data
+    # No published ports; fronted by the reverse proxy on the edge network.
+    networks:
+      - edge
+
+volumes:
+  npm-data:
+  npm-letsencrypt:
+  n8n-data:
+  uptime-kuma-data:
+
+networks:
+  edge:
+    driver: bridge

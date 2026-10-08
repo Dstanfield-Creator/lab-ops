@@ -1,0 +1,17 @@
+---
+# Example variable overrides for all hosts.
+# Copy to all.yml and edit. No secrets in here - use Ansible Vault or 1Password.
+
+admin_user: admin
+
+# Replace with your own public key. The private half never enters git.
+admin_ssh_public_key: "ssh-ed25519 AAAAEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLE admin@example.com"
+
+# Your real management subnet (RFC 5737 placeholder shown).
+mgmt_subnet: 192.0.2.0/24
+
+# Tailscale interface name on the guests.
+tailscale_iface: tailscale0
+
+# Leave false until out-of-band access is confirmed; see tasks/main.yml.
+ufw_enabled: false

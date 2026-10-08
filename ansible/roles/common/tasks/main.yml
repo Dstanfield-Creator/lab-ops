@@ -1,0 +1,93 @@
+---
+# Common host baseline: admin user, SSH hardening, host firewall,
+# guest agent, and automatic security updates.
+
+- name: Ensure the ssh login group exists
+  ansible.builtin.group:
+    name: "{{ ssh_allow_group }}"
+    state: present
+
+- name: Create the admin user
+  ansible.builtin.user:
+    name: "{{ admin_user }}"
+    groups: "{{ (admin_groups + [ssh_allow_group]) | join(',') }}"
+    append: true
+    shell: /bin/bash
+    create_home: true
+    state: present
+
+- name: Install the admin authorized key
+  ansible.posix.authorized_key:
+    user: "{{ admin_user }}"
+    key: "{{ admin_ssh_public_key }}"
+    state: present
+    exclusive: false
+
+- name: Install baseline packages
+  ansible.builtin.apt:
+    name: "{{ baseline_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Deploy sshd hardening drop-in
+  ansible.builtin.template:
+    src: sshd_hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/10-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+    # Validate the whole config before accepting the new file; a bad
+    # drop-in otherwise leaves sshd unable to restart.
+    validate: "sshd -t -f %s"
+  notify: Reload sshd
+
+- name: Enable and start the qemu guest agent
+  ansible.builtin.systemd:
+    name: qemu-guest-agent
+    enabled: true
+    state: started
+
+- name: Enable unattended security upgrades
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+# --- Host firewall ---------------------------------------------------------
+# Dead-man switch caveat: enabling a default-deny firewall over SSH can lock
+# you out if a rule is wrong. Before setting ufw_enabled: true, arm an
+# out-of-band auto-disable (e.g. an at-job or `qm guest exec` timer on the
+# Proxmox host that runs `ufw disable` in a few minutes), apply, then confirm
+# a brand-new SSH session still connects before cancelling the timer.
+# These rules are always declared; only the final enable is gated.
+
+- name: Allow SSH from the management subnet
+  community.general.ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+    from_ip: "{{ mgmt_subnet }}"
+
+- name: Allow all traffic on the Tailscale interface
+  community.general.ufw:
+    rule: allow
+    direction: in
+    interface: "{{ tailscale_iface }}"
+
+- name: Set default-deny for incoming, allow outgoing
+  community.general.ufw:
+    direction: "{{ item.direction }}"
+    policy: "{{ item.policy }}"
+  loop:
+    - { direction: incoming, policy: deny }
+    - { direction: outgoing, policy: allow }
+
+- name: Enable UFW (gated - see dead-man switch note above)
+  community.general.ufw:
+    state: enabled
+  when: ufw_enabled | bool

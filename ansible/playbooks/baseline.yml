@@ -1,0 +1,9 @@
+---
+# Apply the common host baseline to every host in the inventory.
+# Usage: ansible-playbook playbooks/baseline.yml
+- name: Apply common host baseline
+  hosts: all
+  become: true
+  gather_facts: true
+  roles:
+    - common

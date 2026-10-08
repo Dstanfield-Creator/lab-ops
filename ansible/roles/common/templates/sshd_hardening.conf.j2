@@ -1,0 +1,24 @@
+# Managed by Ansible (common role) - do not edit by hand.
+# Dropped at /etc/ssh/sshd_config.d/10-hardening.conf
+
+PasswordAuthentication no
+PubkeyAuthentication yes
+PermitRootLogin no
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+UsePAM yes
+
+# Only members of this group may log in over SSH.
+AllowGroups {{ ssh_allow_group }}
+
+# Modern, high-assurance algorithms only.
+Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
+KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,sntrup761x25519-sha512@openssh.com
+MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com
+
+# Tighten the session a little further.
+X11Forwarding no
+MaxAuthTries 3
+LoginGraceTime 20
+ClientAliveInterval 300
+ClientAliveCountMax 2

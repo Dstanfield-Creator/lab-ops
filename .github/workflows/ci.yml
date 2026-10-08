@@ -1,0 +1,28 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    name: YAML and JSON validation
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PyYAML
+        run: python3 -m pip install --quiet pyyaml
+      - name: Validate YAML and JSON
+        run: |
+          python3 - <<'PY'
+          import glob, json, sys, yaml
+          bad = 0
+          for f in sorted(glob.glob('**/*.yml', recursive=True) + glob.glob('**/*.yaml', recursive=True)):
+              try: list(yaml.safe_load_all(open(f))); print("ok  ", f)
+              except Exception as e: print("FAIL", f, e); bad += 1
+          for f in sorted(glob.glob('**/*.json', recursive=True)):
+              try: json.load(open(f)); print("ok  ", f)
+              except Exception as e: print("FAIL", f, e); bad += 1
+          sys.exit(1 if bad else 0)
+          PY
