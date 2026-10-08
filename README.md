@@ -26,8 +26,8 @@ The approach is GitOps-lite:
 The narrative write-ups - why things are built the way they are, what broke, and what I
 learned - live in [`docs/`](./docs/). The scripts actually in use live in
 [`scripts/`](./scripts/), and the Proxmox VM Terraform in [`terraform/`](./terraform/).
-Monitoring stacks live in the [monitoring](https://github.com/Dstanfield-Creator/monitoring)
-department; network builds and firewall tooling in [network](https://github.com/Dstanfield-Creator/network).
+Monitoring stacks live in [cyber-resources/monitoring](https://github.com/Dstanfield-Creator/cyber-resources/tree/master/monitoring);
+network builds and firewall tooling in [network](https://github.com/Dstanfield-Creator/network).
 
 ## Architecture
 
@@ -124,7 +124,7 @@ lab-ops/
 | Guest OS         | Debian                   | Base image for every VM                      |
 | Config mgmt      | Ansible                  | Applies the `common` host baseline           |
 | Services         | Docker Compose           | Runs containerised workloads on docker-host  |
-| Observability    | Prometheus / Grafana     | Stacks live in the [monitoring](https://github.com/Dstanfield-Creator/monitoring) repo |
+| Observability    | Prometheus / Grafana     | Stacks live in [cyber-resources/monitoring](https://github.com/Dstanfield-Creator/cyber-resources/tree/master/monitoring) |
 | Remote access    | Tailscale                | Mesh VPN; no ports exposed to the internet   |
 | Dependency bot   | Renovate                 | Opens PRs for image and action updates       |
 | CI               | GitHub Actions           | Lint and validate on push (added separately) |

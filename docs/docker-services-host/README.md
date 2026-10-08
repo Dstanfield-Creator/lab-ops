@@ -19,7 +19,7 @@ The Pi was retired in September 2026. Its address is kept out of every script an
 |---|---|---|---|
 | Nginx Proxy Manager | `jc21/nginx-proxy-manager` | TLS termination and friendly hostnames for everything below | :80 / :443, admin :81 (LAN only) |
 | n8n | `docker.n8n.io/n8nio/n8n` | Workflow automation: lab notifications, log enrichment, scheduled checks | NPM |
-| Grafana | `grafana/grafana-oss` | Dashboards for [MyDashboard](https://github.com/Dstanfield-Creator/monitoring/tree/main/mydashboard/) | NPM |
+| Grafana | `grafana/grafana-oss` | Dashboards for [MyDashboard](https://github.com/Dstanfield-Creator/cyber-resources/tree/master/monitoring/mydashboard/) | NPM |
 | RustDesk server | `rustdesk/rustdesk-server` (`hbbs` + `hbbr`) | Self-hosted remote desktop relay for family machines | :21115–21119 |
 | Uptime Kuma *(planned)* | `louislam/uptime-kuma` | Up/down checks for lab services | NPM |
 
@@ -65,7 +65,7 @@ Docker / Compose · reverse proxy and TLS · service migration planning · UFW h
 
 ## Related
 
-- [Proxmox Lab Platform](../proxmox-lab-platform/) · [MyDashboard](https://github.com/Dstanfield-Creator/monitoring/tree/main/mydashboard/) · [Tailscale Remote Access](https://github.com/Dstanfield-Creator/network/tree/main/remote-access/tailscale-remote-access/) · [Firewall Dead-Man Switch](https://github.com/Dstanfield-Creator/network/tree/main/firewall/firewall-deadman-switch/)
+- [Proxmox Lab Platform](../proxmox-lab-platform/) · [MyDashboard](https://github.com/Dstanfield-Creator/cyber-resources/tree/master/monitoring/mydashboard/) · [Tailscale Remote Access](https://github.com/Dstanfield-Creator/network/tree/main/remote-access/tailscale-remote-access/) · [Firewall Dead-Man Switch](https://github.com/Dstanfield-Creator/network/tree/main/firewall/firewall-deadman-switch/)
 
 ---
 
