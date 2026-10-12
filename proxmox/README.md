@@ -7,8 +7,7 @@ lab follows are written down so they survive a rebuild.
 ## The node
 
 A single physical host runs Proxmox VE. It carries every VM in this lab:
-`docker-host` for the Compose stacks, `paperclip` for assistant/agent
-workloads, a Proxmox Backup Server (PBS) VM, and a throwaway attack box used
+`docker-host` for the Compose stacks, a Proxmox Backup Server (PBS) VM, and a throwaway attack box used
 for practice. A single Linux bridge gives the guests access to the lab LAN;
 documentation uses the RFC 5737 range `192.0.2.0/24` in place of the real one.
 

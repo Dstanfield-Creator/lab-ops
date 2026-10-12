@@ -39,7 +39,6 @@ flowchart TB
 
     subgraph lan[Lab LAN bridge]
         docker[VM: docker-host]
-        paperclip[VM: paperclip]
         pbs[VM: backup server]
         attack[VM: attack box]
     end
@@ -47,17 +46,14 @@ flowchart TB
     ts[Tailscale mesh]
 
     pve --> docker
-    pve --> paperclip
     pve --> pbs
     pve --> attack
 
     docker --- lan
-    paperclip --- lan
     pbs --- lan
     attack --- lan
 
     ts -.remote access.-> docker
-    ts -.remote access.-> paperclip
     pbs -.backups.-> pve
 ```
 

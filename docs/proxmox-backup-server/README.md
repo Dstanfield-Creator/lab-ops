@@ -21,7 +21,7 @@ for over a month. A full root disk also blocked ISO downloads and template build
 | VM | 211 `pbs`, 4 GB RAM, 32 GB OS disk, `protection=1` |
 | Datastore | `backup`, on a separate **250 GB** virtual disk, **excluded from vzdump** (`backup=0`) so the backup server does not back up its own backups |
 | Clients | the Proxmox node, via a `pbs` storage entry named `pbs-backup` |
-| Schedule | Sunday 02:00, VMs 105–108 (range) and 210 (Paperclip) |
+| Schedule | Sunday 02:00, VMs 105–108 (range) |
 | Retention | prune: keep 4 weekly + 3 monthly; GC weekly |
 | Auth | PVE → PBS with an API token (`pve-backup@pbs!pve`), secret only in `/etc/pve/priv/storage/pbs-backup.pw` |
 | Network | same lab LAN, PBS UI on :8007 reachable only from the LAN |
@@ -64,13 +64,13 @@ pbs: pbs-backup
         username pve-backup@pbs!pve
 ```
 
-with the token secret in `/etc/pve/priv/storage/pbs-backup.pw` (mode 600). Then point the existing weekly job at `pbs-backup`, add VM 210, and set the old `local`-based dumps to be removed.
+with the token secret in `/etc/pve/priv/storage/pbs-backup.pw` (mode 600). Then point the existing weekly job at `pbs-backup`, and set the old `local`-based dumps to be removed.
 
 Verify:
 
 ```bash
 pvesm status                       # pbs-backup active, free space sane
-vzdump 210 --storage pbs-backup    # one manual run before trusting the schedule
+vzdump 105 --storage pbs-backup    # one manual run before trusting the schedule
 proxmox-backup-client list --repository 'pve-backup@pbs!pve@192.0.2.31:backup'
 ```
 
@@ -79,7 +79,7 @@ proxmox-backup-client list --repository 'pve-backup@pbs!pve@192.0.2.31:backup'
 1. **Token privileges are capped by the owning user.** Granting `DatastoreBackup` to `pve-backup@pbs!pve` alone produces `permission check failed` on the PVE side. The ACL has to be on the user as well.
 2. **`pvesm add pbs … ` without `--password` fails *and deletes* the `.pw` file it was supposed to use.** Write the `storage.cfg` stanza directly and create the password file by hand instead.
 3. **Exclude the datastore disk from backups.** Otherwise the first backup of VM 211 tries to archive 250 GB of backups into itself.
-4. **`protection=1` on the PBS VM.** The backup server is the one guest a runaway automation token must never be able to destroy. Automation tokens are also overridden to read-only on this VM's path (see [Paperclip AI Agents](https://github.com/Dstanfield-Creator/ai-automation/tree/main/paperclip-ai-agents/)).
+4. **`protection=1` on the PBS VM.** The backup server is the one guest a runaway automation token must never be able to destroy.
 
 ## Outcome
 
@@ -94,7 +94,6 @@ Backup architecture (3-2-1 thinking on a one-node budget) · Proxmox Backup Serv
 ## Related
 
 - [Proxmox Lab Platform](../proxmox-lab-platform/) — the node being backed up
-- [Paperclip AI Agents](https://github.com/Dstanfield-Creator/ai-automation/tree/main/paperclip-ai-agents/) — the other protected VM, and the automation token design
 
 ---
 

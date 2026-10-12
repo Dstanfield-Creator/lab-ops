@@ -81,7 +81,6 @@ Starting QEMU VMs (mode=ds-lab)...
   VM 109 (docker-host): already running
   VM 110 (hackerv1): already running
   VM 111 (omarchy-test): skipped (standalone)
-  VM 210 (paperclip): already running
   VM 211 (pbs): already running
 Starting LXC containers...
   No LXC containers.
